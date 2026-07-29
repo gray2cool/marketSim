@@ -1,0 +1,7 @@
+pandas
+pydantic
+instructor
+openai
+python-dotenv
+kaggle
+numpy
