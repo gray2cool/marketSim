@@ -4,9 +4,6 @@ from pydantic import BaseModel, Field, model_validator
 from openai import OpenAI
 from typing import Literal
 
-# ==========================================
-# 1. DEFINE THE STRICT DATA CONTRACT (PYDANTIC)
-# ==========================================
 
 class MarketRationale(BaseModel):
     order_book_analysis: str = Field(
@@ -17,7 +14,6 @@ class MarketRationale(BaseModel):
     )
 
 class TradingAction(BaseModel):
-    # Using Literal enforces that the LLM can ONLY choose one of these exact four strings
     action_type: Literal["BUY", "SELL", "HOLD", "CANCEL"]
     
     price: float = Field(
@@ -27,7 +23,6 @@ class TradingAction(BaseModel):
         description="Number of shares to route. Must be 0 if action is HOLD or CANCEL."
     )
 
-    # A custom validator to prevent the LLM from making illogical trades (e.g., Holding 500 shares)
     @model_validator(mode='after')
     def validate_hold_cancel_logic(self):
         if self.action_type in ["HOLD", "CANCEL"]:
@@ -43,19 +38,7 @@ class AgentDecision(BaseModel):
     rationale: MarketRationale
     action: TradingAction
 
-
-# ==========================================
-# 2. INITIALIZE THE INSTRUCTOR CLIENT
-# ==========================================
-
-# Instructor wraps the standard OpenAI client (this also works with local models via vLLM/Ollama)
-# Make sure your OPENAI_API_KEY environment variable is set
 client = instructor.from_openai(OpenAI())
-
-
-# ==========================================
-# 3. THE GUARD FUNCTION
-# ==========================================
 
 def get_trading_decision(market_state_log: str) -> AgentDecision:
     """
@@ -63,11 +46,10 @@ def get_trading_decision(market_state_log: str) -> AgentDecision:
     return a validated AgentDecision Pydantic object.
     """
     try:
-        # The 'response_model' parameter is where Instructor works its magic
         decision = client.chat.completions.create(
-            model="gpt-4o-mini", # Use a cheap, fast model for the Teacher rollout generation
+            model="gpt-4o-mini",
             response_model=AgentDecision,
-            max_retries=3, # If the LLM breaks the schema, Instructor automatically prompts it to fix the error up to 3 times
+            max_retries=3,
             messages=[
                 {
                     "role": "system",
@@ -83,7 +65,6 @@ def get_trading_decision(market_state_log: str) -> AgentDecision:
     
     except Exception as e:
         print(f"Schema Guard failed to parse LLM output: {e}")
-        # Fallback safeguard to keep the simulator running
         return AgentDecision(
             rationale=MarketRationale(
                 order_book_analysis="ERROR OR TIMEOUT", 
@@ -92,11 +73,7 @@ def get_trading_decision(market_state_log: str) -> AgentDecision:
             action=TradingAction(action_type="HOLD", price=0.0, size=0)
         )
 
-# ==========================================
-# TEST EXECUTION
-# ==========================================
 if __name__ == "__main__":
-    # Simulate a log generated from your previous Pandas script
     sample_market_log = """
     === MARKET STATE START ===
     Timestamp: 09:30:00.600 | Ticker: AAPL
@@ -116,7 +93,6 @@ if __name__ == "__main__":
     
     validated_decision = get_trading_decision(sample_market_log)
     
-    # The output is now a completely type-safe Python object, not a messy string!
     print("--- VALIDATED OBJECT PROPERTIES ---")
     print(f"Action Type:  {validated_decision.action.action_type}")
     print(f"Trade Size:   {validated_decision.action.size}")

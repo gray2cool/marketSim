@@ -6,14 +6,9 @@ from pydantic import BaseModel, Field, model_validator
 from openai import OpenAI
 from typing import Literal
 
-# [FREE STACK ELEMENT 3]: Environment Variables Security
-# This must be loaded BEFORE importing or initializing clients that depend on environment variables
 from dotenv import load_dotenv
 load_dotenv()
 
-# ==========================================
-# 1. SCHEMA DEFINITION (Your Guard Rails)
-# ==========================================
 class MarketRationale(BaseModel):
     order_book_analysis: str = Field(description="Reasoning about bid/ask imbalance.")
     macro_sentiment_alignment: str = Field(description="Market momentum context.")
@@ -33,11 +28,6 @@ class AgentDecision(BaseModel):
     rationale: MarketRationale
     action: TradingAction
 
-
-# ==========================================
-# 2. LLM CLIENT SETUP via Protected Env
-# ==========================================
-# os.environ.get automatically reads the key injected by load_dotenv()
 client = instructor.from_openai(
     OpenAI(
         base_url="https://api.groq.com/openai/v1",
@@ -46,37 +36,27 @@ client = instructor.from_openai(
     mode=instructor.Mode.TOOLS
 )
 
-
-# ==========================================
-# 3. KAGGLE API DYNAMIC INGESTION LAYER
-# ==========================================
 def download_kaggle_dataset(dataset_slug: str, target_file: str) -> str:
     """
     Programmatically authenticates and downloads a dataset from Kaggle 
     using credentials provided securely through the .env file.
     """
-    # The kaggle package instantly reads KAGGLE_USERNAME and KAGGLE_KEY from the environment
+
     from kaggle.api.kaggle_api_extended import KaggleApi
     
     api = KaggleApi()
     print("Authenticating with Kaggle API via environment variables...")
     api.authenticate()
     
-    # Check if the file already exists locally to avoid redundant downloads
     if os.path.exists(target_file):
         print(f"Dataset asset '{target_file}' already exists locally. Skipping download.")
         return target_file
         
     print(f"Downloading dataset '{dataset_slug}' from Kaggle...")
-    # Downloads and automatically unzips the files into the current working directory
     api.dataset_download_files(dataset_slug, path=".", unzip=True)
     print("Download and extraction complete.")
     return target_file
 
-
-# ==========================================
-# 4. STATE SIMULATOR
-# ==========================================
 class MarketBookSimulator:
     def __init__(self):
         self.bids = pd.DataFrame(columns=["price", "size"])
@@ -109,14 +89,9 @@ class MarketBookSimulator:
         log_lines.append("=== MARKET STATE END ===")
         return "\n".join(log_lines)
 
-
-# ==========================================
-# 5. THE ROLLOUT LOOP (The Data Collector)
-# ==========================================
 def run_rollout_collection(dataset_slug: str, csv_filename: str, output_jsonl_path: str):
     sim = MarketBookSimulator()
     
-    # Fetch the data file securely using our ingestion layer
     csv_file_path = download_kaggle_dataset(dataset_slug, csv_filename)
     
     historical_ticks = pd.read_csv(csv_file_path)
@@ -125,22 +100,19 @@ def run_rollout_collection(dataset_slug: str, csv_filename: str, output_jsonl_pa
     with open(output_jsonl_path, "a") as dataset_file:
         for index, tick in historical_ticks.iterrows():
             
-            # --- DATA MAPPING FIX ---
-            # The BTC dataset uses 'bid'/'ask' and 'quantity'. 
-            # We map them to 'buy'/'sell' and 'size' so our simulator understands it.
             mapped_side = "buy" if tick["side"] == "bid" else "sell"
             
             sim.update_book(
                 side=mapped_side, 
                 price=float(tick["price"]), 
-                size=float(tick["quantity"]) # Map 'quantity' to 'size'
+                size=float(tick["quantity"])
             )
             
             state_prompt = sim.generate_llm_log("BTC-USDT", tick["timestamp"], depth=3)
             
             try:
                 decision = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile", # <--- UPDATE THIS LINE
+                    model="llama-3.3-70b-versatile",
                     response_model=AgentDecision,
                     messages=[
                         {"role": "system", "content": "You are an expert high-frequency trading algorithm."},
@@ -162,11 +134,7 @@ def run_rollout_collection(dataset_slug: str, csv_filename: str, output_jsonl_pa
             except Exception as e:
                 print(f"Failed on tick {index+1}: {e}")
 
-# ==========================================
-# 6. THE RUNTIME ENVIRONMENT
-# ==========================================
 if __name__ == "__main__":
-    # Pointing to the specific BTC L2 Order Book dataset you found
     run_rollout_collection(
         dataset_slug="fast42/btc-l2-order-book-btcusdt-1s-11825", 
         csv_filename="2025-08-11.csv", 
